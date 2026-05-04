@@ -8,6 +8,11 @@ class AiRequest {
     required this.rightContext,
     required this.currentSentence,
     required this.currentParagraph,
+    required this.currentParagraphFull,
+    required this.paragraphIndex,
+    required this.totalParagraphs,
+    required this.cursorAtParagraphStart,
+    required this.cursorAtParagraphEnd,
     required this.completionMode,
     required this.prompt,
   });
@@ -18,6 +23,11 @@ class AiRequest {
   final String rightContext;
   final String currentSentence;
   final String currentParagraph;
+  final String currentParagraphFull;
+  final int paragraphIndex;
+  final int totalParagraphs;
+  final bool cursorAtParagraphStart;
+  final bool cursorAtParagraphEnd;
   final CompletionMode completionMode;
   final String prompt;
 }

@@ -374,6 +374,12 @@ class _EssayEditorPageState extends State<EssayEditorPage> {
               ],
             ),
           ),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _editorController.bodyController,
+            builder: (context, value, _) {
+              return _WordCountBadge(wordCount: _countWords(value.text));
+            },
+          ),
           FilledButton.tonalIcon(
             onPressed: _archiveCurrentDraft,
             icon: const Icon(Icons.archive_outlined),
@@ -525,11 +531,15 @@ class _EssayEditorPageState extends State<EssayEditorPage> {
     }
 
     const starters = <String, String>{
-      'however,': 'moreover,',
-      'moreover,': 'however,',
-      'therefore,': 'consequently,',
-      'for example,': 'for instance,',
-      'in addition,': 'additionally,',
+      'however,': 'Moreover,',
+      'moreover,': 'However,',
+      'therefore,': 'Consequently,',
+      'consequently,': 'Therefore,',
+      'for example,': 'For instance,',
+      'for instance,': 'For example,',
+      'in addition,': 'Additionally,',
+      'additionally,': 'In addition,',
+      'in additional,': 'In addition,',
     };
     final lower = text.toLowerCase();
     for (final entry in starters.entries) {
@@ -538,18 +548,162 @@ class _EssayEditorPageState extends State<EssayEditorPage> {
       }
     }
 
-    if (text.split(RegExp(r'\s+')).length >= 4) {
-      final loweredFirst = _lowercaseFirst(text);
-      return 'In addition, $loweredFirst';
+    final variant = _buildLexicalVariant(text);
+    if (variant.isEmpty) {
+      return '';
     }
-    return '';
+    if (variant.toLowerCase() == text.toLowerCase()) {
+      return '';
+    }
+    return variant;
   }
 
-  String _lowercaseFirst(String text) {
-    if (text.isEmpty) {
-      return text;
+  String _buildLexicalVariant(String text) {
+    var result = text;
+
+    final phraseReplacements = <_ReplacementRule>[
+      _ReplacementRule(
+        pattern: RegExp(r'\ba lot of\b', caseSensitive: false),
+        replacement: 'a considerable amount of',
+      ),
+      _ReplacementRule(
+        pattern: RegExp(r'\bin order to\b', caseSensitive: false),
+        replacement: 'to',
+      ),
+      _ReplacementRule(
+        pattern: RegExp(r'\bmore and more\b', caseSensitive: false),
+        replacement: 'increasingly',
+      ),
+    ];
+    for (final rule in phraseReplacements) {
+      result = _replaceFirstPreserveCase(
+        input: result,
+        pattern: rule.pattern,
+        replacement: rule.replacement,
+      );
     }
-    return '${text[0].toLowerCase()}${text.substring(1)}';
+
+    final wordReplacements = <String, String>{
+      'important': 'crucial',
+      'significant': 'substantial',
+      'big': 'major',
+      'small': 'minor',
+      'good': 'beneficial',
+      'bad': 'detrimental',
+      'help': 'assist',
+      'show': 'demonstrate',
+      'use': 'utilise',
+      'people': 'individuals',
+      'many': 'numerous',
+      'more': 'additional',
+      'less': 'reduced',
+      'increase': 'rise',
+      'increases': 'rises',
+      'increased': 'rose',
+      'reduce': 'mitigate',
+      'reduces': 'mitigates',
+      'reduced': 'mitigated',
+      'problem': 'issue',
+      'problems': 'issues',
+      'idea': 'notion',
+      'ideas': 'notions',
+      'think': 'argue',
+      'thinks': 'argues',
+      'very': 'highly',
+      'really': 'genuinely',
+    };
+
+    var replacedAny = false;
+    for (final entry in wordReplacements.entries) {
+      final next = _replaceFirstWordPreserveCase(
+        input: result,
+        from: entry.key,
+        to: entry.value,
+      );
+      if (next != result) {
+        result = next;
+        replacedAny = true;
+        break;
+      }
+    }
+
+    if (!replacedAny) {
+      final next = _swapBecauseSince(result);
+      if (next != result) {
+        result = next;
+      }
+    }
+
+    return result;
+  }
+
+  String _swapBecauseSince(String input) {
+    final because = RegExp(r'\bbecause\b', caseSensitive: false);
+    if (because.hasMatch(input)) {
+      return _replaceFirstPreserveCase(
+        input: input,
+        pattern: because,
+        replacement: 'since',
+      );
+    }
+    final since = RegExp(r'\bsince\b', caseSensitive: false);
+    if (since.hasMatch(input)) {
+      return _replaceFirstPreserveCase(
+        input: input,
+        pattern: since,
+        replacement: 'because',
+      );
+    }
+    return input;
+  }
+
+  String _replaceFirstWordPreserveCase({
+    required String input,
+    required String from,
+    required String to,
+  }) {
+    final pattern = RegExp(
+      '\\b${RegExp.escape(from)}\\b',
+      caseSensitive: false,
+    );
+    return _replaceFirstPreserveCase(
+      input: input,
+      pattern: pattern,
+      replacement: to,
+    );
+  }
+
+  String _replaceFirstPreserveCase({
+    required String input,
+    required RegExp pattern,
+    required String replacement,
+  }) {
+    final match = pattern.firstMatch(input);
+    if (match == null) {
+      return input;
+    }
+    final matchedText = match.group(0) ?? '';
+    final effectiveReplacement = _applyCaseLike(matchedText, replacement);
+    return input.replaceRange(match.start, match.end, effectiveReplacement);
+  }
+
+  String _applyCaseLike(String sample, String replacement) {
+    if (sample.isEmpty || replacement.isEmpty) {
+      return replacement;
+    }
+    final sampleIsAllCaps = sample.toUpperCase() == sample;
+    if (sampleIsAllCaps) {
+      return replacement.toUpperCase();
+    }
+    final sampleStartsUpper = sample[0].toUpperCase() == sample[0];
+    if (sampleStartsUpper) {
+      return '${replacement[0].toUpperCase()}${replacement.substring(1)}';
+    }
+    return replacement;
+  }
+
+  int _countWords(String text) {
+    return RegExp(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*").allMatches(text).length;
   }
 
   void _onAssistError(String message) {
@@ -754,7 +908,16 @@ $body
     required String before,
     required String after,
   }) {
-    var suggestion = raw.replaceAll('\r', '').replaceAll('\n', ' ').trim();
+    var suggestion = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    suggestion = suggestion.replaceAll(RegExp(r'\n\s*\n+'), '\n\n');
+
+    const paragraphSentinel = '\u0000';
+    suggestion = suggestion.replaceAll('\n\n', paragraphSentinel);
+    suggestion = suggestion.replaceAll('\n', ' ');
+    suggestion = suggestion.replaceAll(paragraphSentinel, '\n\n');
+
+    suggestion = suggestion.replaceFirst(RegExp(r'^[ \t]+'), '');
+    suggestion = suggestion.trimRight();
     if (suggestion.isEmpty) {
       return suggestion;
     }
@@ -810,6 +973,7 @@ $body
 
     final firstChar = _firstNonSpaceChar(suggestion);
     final lastChar = _lastNonSpaceChar(suggestion);
+    final startsWithParagraphBreak = suggestion.startsWith('\n\n');
     final beforeEndsWithSpace =
         before.isNotEmpty && RegExp(r'\s$').hasMatch(before);
     final afterStartsWithSpace =
@@ -818,6 +982,7 @@ $body
         before.isNotEmpty &&
         !beforeEndsWithSpace &&
         !isWordContinuation &&
+        !startsWithParagraphBreak &&
         firstChar != null &&
         !_isPunctuation(firstChar) &&
         !_isOpeningBracket(firstChar);
@@ -972,4 +1137,51 @@ $body
     }
     return null;
   }
+}
+
+class _WordCountBadge extends StatelessWidget {
+  const _WordCountBadge({required this.wordCount});
+
+  final int wordCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF7A9BFF).withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFF7A9BFF).withValues(alpha: 0.45),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.format_list_numbered_rounded,
+            size: 18,
+            color: Color(0xFF4F63C7),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '总词数：$wordCount',
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF3F52AE),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReplacementRule {
+  const _ReplacementRule({required this.pattern, required this.replacement});
+
+  final RegExp pattern;
+  final String replacement;
 }
