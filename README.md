@@ -1,6 +1,8 @@
 # IETLS AI (Flutter)
 
 IETLS AI 是一个面向 IELTS Writing Task 2 的 Flutter 写作辅助项目，核心交互模仿 VSCode 的自动补全体验：**AI 生成建议，用户按 Tab 直接接受补全**。
+![图 0](images/382dade25adaf5fbaf4ea375504bc0e1057c73dbeac72c2f3cc28351ea4f31ff.png)  
+![图 1](images/88a5844c145e5815689c682c58f8f56b01f923a86868600fc3ed1261c679fba6.png)  
 
 ## 目标体验（VSCode 风格）
 
