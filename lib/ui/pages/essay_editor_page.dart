@@ -114,18 +114,20 @@ class _EssayEditorPageState extends State<EssayEditorPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 28,
-                height: 28,
-                decoration: const BoxDecoration(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF6E87FF), Color(0xFF8E6DFF)],
+                  color: Colors.white.withValues(alpha: 0.72),
+                  border: Border.all(
+                    color: const Color(0xFF8DA4FF).withValues(alpha: 0.45),
                   ),
                 ),
-                child: const Icon(
-                  Icons.auto_awesome_rounded,
-                  size: 16,
-                  color: Colors.white,
+                child: ClipOval(
+                  child: Image.asset(
+                    'images/logo.png',
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
