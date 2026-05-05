@@ -1,9 +1,14 @@
 import 'package:ieltsai/ai/models/ai_request.dart';
+import 'package:ieltsai/ai/paragraph_framework_analyzer.dart';
 
 class PromptBuilder {
   const PromptBuilder();
 
-  String build(AiRequest request) {
+  static const ParagraphFrameworkAnalyzer _frameworkAnalyzer =
+      ParagraphFrameworkAnalyzer();
+
+  String build(AiRequest request, {String exemplarGuide = ''}) {
+    final framework = _frameworkAnalyzer.analyze(request);
     return '''
 System:
 You are an IELTS Writing Task 2 inline autocomplete engine targeting Band 7+.
@@ -12,11 +17,24 @@ Primary objective:
 Produce the best next continuation to insert at the cursor, fully aligned with the prompt and the surrounding essay.
 
 Output rules (hard constraints):
-- Return ONLY the continuation text to insert at cursor.
-- No markdown. No explanations. No meta commentary.
-- Do NOT repeat any words from the preceding 3–5 words.
-- Keep the completion under 25 words.
+
+Return format (hard constraints):
+- Return ONLY a single-line JSON object, with EXACT keys:
+  {"text": string, "leadingSpace": boolean, "paragraphBreak": boolean}
+- No markdown. No code fences. No explanations. No extra keys.
+- "text" must be English only; do NOT include any leading/trailing whitespace.
+- "text" must NOT contain any newline characters; paragraphing is controlled ONLY by "paragraphBreak".
+- Keep the completion under 25 words (words counted in "text").
 - Formal academic register; no casual tone.
+
+Exemplar guidance (use as structural prior; do not copy text verbatim):
+${exemplarGuide.trim().isEmpty ? '(none provided)' : exemplarGuide.trim()}
+
+Paragraph framework control (must-follow):
+- Silently infer: (1) which paragraph you are writing (intro/body/conclusion) and (2) the controlling idea (theme) of the current paragraph.
+- If staying in the same paragraph, continue ONLY that controlling idea; do not introduce a new main idea.
+- If starting a new paragraph, the first sentence must set ONE new controlling idea aligned with the prompt.
+- If completion mode is nextParagraph, output ONLY the next paragraph's first sentence (topic sentence or conclusion opener).
 
 Decisiveness (must-follow):
 - Write with a clear, confident stance. Avoid hedging and ambiguity.
@@ -74,10 +92,10 @@ If question type is "Advantages/Disadvantages":
 - Choose a clear position if needed (e.g., advantages outweigh disadvantages) and maintain it.
 
 Automatic paragraphing:
-- You MAY output paragraph breaks using a blank line ("\n\n") ONLY when it is appropriate.
-- If completion mode is nextParagraph, write the next paragraph's first sentence.
-- If the cursor is already at a new paragraph (text before cursor ends with a newline), do NOT add extra leading blank lines.
-- In other modes, generally avoid paragraph breaks; however, you MAY insert at most ONE "\n\n" when you are clearly finishing one paragraph and starting the next (e.g., moving into a new body paragraph or starting the conclusion).
+
+Paragraphing decision (JSON fields):
+- If you decide to start a new paragraph now, set "paragraphBreak": true.
+- Otherwise set "paragraphBreak": false.
 
 User:
 IELTS Question:
@@ -97,6 +115,12 @@ Paragraph signals:
 - Cursor at paragraph start: ${request.cursorAtParagraphStart}
 - Cursor at paragraph end: ${request.cursorAtParagraphEnd}
 
+Heuristic hints (based on strong Band 7+ essay patterns):
+- Current paragraph role guess: ${framework.currentRole.name}
+- Current paragraph theme hint: ${framework.currentThemeHint.isEmpty ? '(unknown)' : framework.currentThemeHint}
+- Suggest starting new paragraph soon: ${framework.suggestStartNewParagraph}
+- Next paragraph role hint (if you start a new one): ${framework.nextRoleHint.name}
+
 Current paragraph (full, around cursor):
 ${request.currentParagraphFull}
 
@@ -107,7 +131,11 @@ Instruction:
 Continue the essay at cursor based on completion mode: ${request.completionMode.name}.
 
 Reminder:
-- If you insert a paragraph break, use exactly a blank line: "\n\n" (at most once).
+
+Leading space decision (JSON fields):
+- If the insertion should start with a space (because the previous character is a letter/number and you are starting a new word), set "leadingSpace": true.
+- If you are continuing the current word (e.g., cursor after "Improve" and you output "d" or "ed"), set "leadingSpace": false.
+- If you start a new paragraph ("paragraphBreak": true), set "leadingSpace": false.
 ''';
   }
 }

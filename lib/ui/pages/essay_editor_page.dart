@@ -243,13 +243,15 @@ class _EssayEditorPageState extends State<EssayEditorPage> {
                             child: GhostTextEditor(
                               controller: _editorController.bodyController,
                               focusNode: _editorController.bodyFocusNode,
-                              suggestion: _activeSuggestion,
+                              suggestion: _stripLeadingSpaceSentinel(
+                                _activeSuggestion,
+                              ),
                               onChanged: _onBodyTextChanged,
                             ),
                           ),
                           const SizedBox(height: 12),
                           SuggestionBar(
-                            suggestions: _suggestionOptions,
+                            suggestions: _displaySuggestions,
                             selectedIndex: _selectedSuggestionIndex,
                             streaming: _isStreaming,
                             onAccept: _acceptSuggestion,
@@ -463,6 +465,12 @@ class _EssayEditorPageState extends State<EssayEditorPage> {
     return _suggestionOptions[index];
   }
 
+  List<String> get _displaySuggestions {
+    return _suggestionOptions
+        .map(_stripLeadingSpaceSentinel)
+        .toList(growable: false);
+  }
+
   void _selectSuggestion(int index) {
     if (index < 0 || index >= _suggestionOptions.length) {
       return;
@@ -494,34 +502,50 @@ class _EssayEditorPageState extends State<EssayEditorPage> {
   }
 
   String _normalizeSuggestionForPreview(String suggestion) {
+    final hadSentinel = suggestion.startsWith(_noAutoLeadingSpaceSentinel);
     final controller = _editorController.bodyController;
     final selection = controller.selection;
     if (!selection.isValid) {
-      return _normalizeInsertion(
+      final normalized = _normalizeInsertion(
         raw: suggestion,
         before: controller.text,
         after: '',
       );
+      if (hadSentinel && normalized.isNotEmpty) {
+        return '$_noAutoLeadingSpaceSentinel$normalized';
+      }
+      return normalized;
     }
     final start = selection.start.clamp(0, controller.text.length);
     final end = selection.end.clamp(0, controller.text.length);
-    return _normalizeInsertion(
+    final normalized = _normalizeInsertion(
       raw: suggestion,
       before: controller.text.substring(0, start),
       after: controller.text.substring(end),
     );
+    if (hadSentinel && normalized.isNotEmpty) {
+      return '$_noAutoLeadingSpaceSentinel$normalized';
+    }
+    return normalized;
   }
 
   List<String> _buildSuggestionOptions(String primary) {
-    final p = primary.trimRight();
-    if (p.isEmpty) {
+    final normalizedPrimary = _normalizeSuggestionForOptions(primary);
+    final displayPrimary = _stripLeadingSpaceSentinel(normalizedPrimary)
+        .trimRight();
+    if (displayPrimary.isEmpty) {
       return const [];
     }
-    final secondary = _buildSecondarySuggestion(p);
-    if (secondary.isEmpty || secondary.toLowerCase() == p.toLowerCase()) {
-      return [p];
+    final secondaryDisplay = _buildSecondarySuggestion(displayPrimary);
+    if (secondaryDisplay.isEmpty ||
+        secondaryDisplay.toLowerCase() == displayPrimary.toLowerCase()) {
+      return [normalizedPrimary];
     }
-    return [p, secondary];
+    final secondaryRaw = _prefixSentinelIfNeeded(
+      secondaryDisplay,
+      normalizedPrimary,
+    );
+    return [normalizedPrimary, secondaryRaw];
   }
 
   String _buildSecondarySuggestion(String primary) {
@@ -703,7 +727,34 @@ class _EssayEditorPageState extends State<EssayEditorPage> {
   }
 
   int _countWords(String text) {
-    return RegExp(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*").allMatches(text).length;
+    final normalized = _normalizeForWordCount(text);
+    return RegExp(r"[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*")
+        .allMatches(normalized)
+        .length;
+  }
+
+  String _normalizeForWordCount(String text) {
+    if (text.isEmpty) {
+      return text;
+    }
+    final buffer = StringBuffer();
+    for (var i = 0; i < text.length; i++) {
+      final codeUnit = text.codeUnitAt(i);
+      if (codeUnit == 0x3000) {
+        buffer.write(' ');
+        continue;
+      }
+      if (codeUnit >= 0xFF01 && codeUnit <= 0xFF5E) {
+        buffer.write(String.fromCharCode(codeUnit - 0xFEE0));
+        continue;
+      }
+      if (codeUnit <= 0x7F) {
+        buffer.writeCharCode(codeUnit);
+      } else {
+        buffer.write(' ');
+      }
+    }
+    return buffer.toString();
   }
 
   void _onAssistError(String message) {
@@ -838,13 +889,18 @@ $body
     if (active.trim().isEmpty) {
       return;
     }
-    final match = RegExp(r'^\s*\S+\s*').firstMatch(active);
+    final hasSentinel = active.startsWith(_noAutoLeadingSpaceSentinel);
+    final display = _stripLeadingSpaceSentinel(active);
+    final match = RegExp(r'^\s*\S+\s*').firstMatch(display);
     if (match == null) {
       return;
     }
     final nextWord = match.group(0) ?? '';
-    _insertText(nextWord, normalizeForContext: true);
-    final remained = active.substring(nextWord.length).trimLeft();
+    final nextWordRaw = hasSentinel
+        ? '$_noAutoLeadingSpaceSentinel$nextWord'
+        : nextWord;
+    _insertText(nextWordRaw, normalizeForContext: true);
+    final remained = display.substring(nextWord.length).trimLeft();
     setState(() {
       if (remained.isEmpty) {
         _suggestionOptions = const [];
@@ -908,8 +964,15 @@ $body
     required String before,
     required String after,
   }) {
+    const noAutoLeadingSpaceSentinel = _noAutoLeadingSpaceSentinel;
     var suggestion = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     suggestion = suggestion.replaceAll(RegExp(r'\n\s*\n+'), '\n\n');
+
+    var disableAutoLeadingSpace = false;
+    if (suggestion.startsWith(noAutoLeadingSpaceSentinel)) {
+      disableAutoLeadingSpace = true;
+      suggestion = suggestion.substring(noAutoLeadingSpaceSentinel.length);
+    }
 
     const paragraphSentinel = '\u0000';
     suggestion = suggestion.replaceAll('\n\n', paragraphSentinel);
@@ -946,8 +1009,14 @@ $body
         suggestionFirstToken.length <= 5 &&
         RegExp(r'^[A-Z][a-z]*$').hasMatch(trailingToken) &&
         RegExp(r'^[a-z]+$').hasMatch(suggestionFirstToken);
+    final suffixContinuation = _looksLikeSuffixContinuation(
+      trailingToken: trailingToken,
+      suggestionFirstToken: suggestionFirstToken,
+    );
     final isWordContinuation =
-        tokenIsPartialContinuation || tokenLooksSuffixContinuation;
+        tokenIsPartialContinuation ||
+        tokenLooksSuffixContinuation ||
+        suffixContinuation;
 
     if (tokenIsPartialContinuation) {
       suggestion = suggestion.replaceFirst(
@@ -983,6 +1052,7 @@ $body
         !beforeEndsWithSpace &&
         !isWordContinuation &&
         !startsWithParagraphBreak &&
+        !disableAutoLeadingSpace &&
         firstChar != null &&
         !_isPunctuation(firstChar) &&
         !_isOpeningBracket(firstChar);
@@ -998,6 +1068,28 @@ $body
     }
     if (needsTrailingSpace && !RegExp(r'\s$').hasMatch(suggestion)) {
       suggestion = '$suggestion ';
+    }
+    return suggestion;
+  }
+
+  static const String _noAutoLeadingSpaceSentinel = '\u0001';
+
+  String _stripLeadingSpaceSentinel(String text) {
+    if (text.startsWith(_noAutoLeadingSpaceSentinel)) {
+      return text.substring(_noAutoLeadingSpaceSentinel.length);
+    }
+    return text;
+  }
+
+  String _normalizeSuggestionForOptions(String raw) {
+    final hasSentinel = raw.startsWith(_noAutoLeadingSpaceSentinel);
+    final display = _stripLeadingSpaceSentinel(raw).trimRight();
+    return hasSentinel ? '$_noAutoLeadingSpaceSentinel$display' : display;
+  }
+
+  String _prefixSentinelIfNeeded(String suggestion, String primaryRaw) {
+    if (primaryRaw.startsWith(_noAutoLeadingSpaceSentinel)) {
+      return '$_noAutoLeadingSpaceSentinel$suggestion';
     }
     return suggestion;
   }
@@ -1116,6 +1208,42 @@ $body
   String _leadingAlphaNumToken(String text) {
     final match = RegExp(r'^\s*([A-Za-z0-9]+)').firstMatch(text);
     return match?.group(1) ?? '';
+  }
+
+  bool _looksLikeSuffixContinuation({
+    required String trailingToken,
+    required String suggestionFirstToken,
+  }) {
+    if (trailingToken.isEmpty || suggestionFirstToken.isEmpty) {
+      return false;
+    }
+    if (trailingToken.length < 3) {
+      return false;
+    }
+    if (!RegExp(r'^[A-Za-z]+$').hasMatch(trailingToken)) {
+      return false;
+    }
+    if (!RegExp(r'^[a-z]+$').hasMatch(suggestionFirstToken)) {
+      return false;
+    }
+    const suffixes = <String>{
+      's',
+      'es',
+      'ed',
+      'ing',
+      'ly',
+      'er',
+      'ers',
+      'est',
+      'ment',
+      'tion',
+      'tions',
+      'ity',
+      'ities',
+      'ied',
+      'ies',
+    };
+    return suffixes.contains(suggestionFirstToken);
   }
 
   String? _firstNonSpaceChar(String text) {

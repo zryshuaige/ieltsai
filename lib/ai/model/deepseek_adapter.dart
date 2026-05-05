@@ -20,12 +20,21 @@ class DeepSeekAdapter implements ModelApiAdapter {
     }
 
     final completion = await _fetchCompletion(request);
-    final words = completion
-        .split(RegExp(r'\s+'))
-        .where((word) => word.isNotEmpty);
-    for (final word in words) {
-      await Future<void>.delayed(const Duration(milliseconds: 35));
-      yield '$word ';
+    final normalized = completion
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .trimRight();
+
+    // Fake streaming, but do NOT inject spaces. Preserve exact whitespace.
+    final tokens = RegExp(r'\s+|[^\s]+')
+        .allMatches(normalized)
+        .map((m) => m.group(0) ?? '')
+        .where((t) => t.isNotEmpty)
+        .toList(growable: false);
+
+    for (final token in tokens) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+      yield token;
     }
   }
 
@@ -36,7 +45,7 @@ class DeepSeekAdapter implements ModelApiAdapter {
         {
           'role': 'system',
           'content':
-              'You are an IELTS Writing Task 2 inline autocomplete engine. Return only the exact continuation text for insertion.',
+              'You are an IELTS Writing Task 2 inline autocomplete engine. Return ONLY a strict JSON object with keys: text, leadingSpace, paragraphBreak. No markdown, no code fences.',
         },
         {'role': 'user', 'content': request.prompt},
       ],

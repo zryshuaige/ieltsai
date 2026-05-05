@@ -4,7 +4,9 @@ import 'package:ieltsai/ai/ai_assist_preference.dart';
 import 'package:ieltsai/ai/completion_mode_detector.dart';
 import 'package:ieltsai/ai/context_extractor.dart';
 import 'package:ieltsai/ai/debouncer.dart';
+import 'package:ieltsai/ai/exemplar_guide.dart';
 import 'package:ieltsai/ai/model/model_api_adapter.dart';
+import 'package:ieltsai/ai/paragraph_framework_analyzer.dart';
 import 'package:ieltsai/ai/post_processor.dart';
 import 'package:ieltsai/ai/prompt_builder.dart';
 import 'package:ieltsai/ai/trigger_policy.dart';
@@ -37,6 +39,11 @@ class AiAssistEngine {
   final PromptBuilder _promptBuilder;
   final PostProcessor _postProcessor;
   final Debouncer _debouncer;
+
+  static const ParagraphFrameworkAnalyzer _paragraphFrameworkAnalyzer =
+      ParagraphFrameworkAnalyzer();
+
+  static final ExemplarGuide _exemplarGuide = ExemplarGuide();
 
   DateTime? _lastRequestedAt;
   int _requestToken = 0;
@@ -130,16 +137,38 @@ class AiAssistEngine {
     _requestToken += 1;
     final currentToken = _requestToken;
     final leftText = snapshot.text.substring(0, snapshot.cursorOffset);
-    final mode = _completionModeDetector.detect(leftText);
+
+    final baseMode = _completionModeDetector.detect(leftText);
     final draftRequest = _contextExtractor.extract(
       snapshot: snapshot,
-      completionMode: mode,
+      completionMode: baseMode,
       prompt: '',
     );
+
+    // Heuristic refinement: if the current paragraph already looks complete
+    // (based on "excellent essay" paragraph patterns), ask the model to start
+    // the next paragraph instead of merely continuing the next sentence.
+    final framework = _paragraphFrameworkAnalyzer.analyze(draftRequest);
+    final refinedMode =
+        framework.suggestStartNewParagraph && baseMode == CompletionMode.nextSentence
+            ? CompletionMode.nextParagraph
+            : baseMode;
+
+    final exemplarGuideText = await _exemplarGuide.getGuideText();
+
     final request = _contextExtractor.extract(
       snapshot: snapshot,
-      completionMode: mode,
-      prompt: _promptBuilder.build(draftRequest),
+      completionMode: refinedMode,
+      prompt: _promptBuilder.build(
+        refinedMode == baseMode
+            ? draftRequest
+            : _contextExtractor.extract(
+                snapshot: snapshot,
+                completionMode: refinedMode,
+                prompt: '',
+              ),
+        exemplarGuide: exemplarGuideText,
+      ),
     );
 
     final buffer = StringBuffer();
